@@ -10,7 +10,7 @@ import random
 import json
 import traceback
 
-from PIL import Image
+from PIL import Image, ImageChops
 import numpy as np
 import cv2
 import zerorpc
@@ -181,7 +181,7 @@ class PhotoMosaicCore(object):
         self.__send_status2tool(1, display_progress, 'Generating photo mosaic . . .')
         total = self.row * self.col
 
-        tgt_img = Image.new('RGB', (self.input['width'], self.input['height']))
+        tgt_img = Image.new('RGBA', (self.input['width'], self.input['height']))
         for i in range(self.row):
             for j in range(self.col):
                 # left, up, right, bottom
@@ -192,14 +192,25 @@ class PhotoMosaicCore(object):
 
                 crop_img = self.input['img'].crop(region)
                 r, g, b = self.__avg_color(crop_img)
-                file_name = self.__get_filename_for_closest_color((r, g, b), i, j)
-                cell_path = os.path.join(self.thumbs_dir, file_name)
-                cell_img = Image.open(cell_path).convert('RGB')
+                a = self.__avg_alpha(crop_img)
 
-                if self.enhance_colors != 0:
-                    alpha = (int)(self.enhance_colors / 100.0 * 255)
-                    tweak_img = Image.new('RGBA', (self.cell['width'], self.cell['height']), (r, g, b, alpha))
-                    cell_img.paste(tweak_img, (0, 0, self.cell['width'], self.cell['height']), tweak_img)
+                # If the mean of the cell pixels are <  1/2*255, then this cell is likely >1/2 transparent pixels. and
+                # we ignore it.  Without this range, edges between color and tranparent have black borders.
+                if a < 127:
+                    cell_img = Image.new("RGBA", (self.cell['width'], self.cell['height']), (0,0,0,0))
+                else:
+                    file_name = self.__get_filename_for_closest_color((r, g, b), i, j)
+                    cell_path = os.path.join(self.thumbs_dir, file_name)
+                    cell_img = Image.open(cell_path).convert('RGBA')
+                
+                    if self.enhance_colors != 0:
+                        cell_alpha = self.__avg_alpha(cell_img)
+                        alpha = (int)(self.enhance_colors / 100.0 * 255)
+                        tweak_img = Image.new('RGBA', (self.cell['width'], self.cell['height']), (r, g, b, alpha))
+                        cell_img.paste(tweak_img, (0, 0, self.cell['width'], self.cell['height']), tweak_img)
+                        # update alpha to cell alpha, since the input image is full alpha originally (because it's jpg)
+                        # this is ok to do.
+                        cell_img.putalpha(ImageChops.constant(cell_img.getchannel("A"), cell_alpha))
 
                 tgt_img.paste(cell_img, region)
 
@@ -213,11 +224,11 @@ class PhotoMosaicCore(object):
         self.__send_status2tool(1, 100, '')
         print()
         if self.tgt_img_filename:
-            self.output_tgt_path = os.path.join(self.output_path, self.tgt_img_filename+'.jpg')
-            tgt_img.save(self.output_tgt_path, format='JPEG', subsampling=0, quality=100)
+            self.output_tgt_path = os.path.join(self.output_path, self.tgt_img_filename+'.png')
+            tgt_img.save(self.output_tgt_path, format='PNG', subsampling=0, quality=100)
         else:
-            self.output_tgt_path = os.path.join(self.output_path, 'output_{0}.jpg'.format(time.perf_counter()))
-            tgt_img.save(self.output_tgt_path, format='JPEG', subsampling=0, quality=100)
+            self.output_tgt_path = os.path.join(self.output_path, 'output_{0}.png'.format(time.perf_counter()))
+            tgt_img.save(self.output_tgt_path, format='PNG', subsampling=0, quality=100)
 
     # (re)generates thumbnails and determines average color for each image
     def __gen_thumbs(self):
@@ -370,6 +381,11 @@ class PhotoMosaicCore(object):
         rgb = np.mean(np.array(img), axis=(0, 1))
         return (int)(rgb[0]), (int)(rgb[1]), (int)(rgb[2])
 
+    @staticmethod
+    def __avg_alpha(img):
+        rgba = np.mean(np.array(img), axis=(0, 1))
+        return (int)(rgba[3])
+
     def __get_filename_for_closest_color(self, rgb, coordy, coordx):
 
         diff_thumbs_info = {}
@@ -450,7 +466,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "-output-path", dest="output_path", default="", help="output path")
     parser.add_argument("-o", "-output-name", dest="tgt_img_filename", default="", help="output file name")
     parser.add_argument("-g", "-gap", dest="min_space_same_thumb", default=4, help="the min distance with same thumbnails image")
-    parser.add_argument("-e", "-enhance-colors", dest="enhance_colors", default=27, help="enhance colors with original image (0~100%)")
+    parser.add_argument("-e", "-enhance-colors", dest="enhance_colors", default=27, help="enhance colors with original image (0~100%%)")
     parser.add_argument("-t", "-tolerance", dest="tolerance", default=0, help="set tolerance and seed args can generate different photo mosaic even the material images are the same")
     parser.add_argument("-seed", dest="seed", default=0, help="random seed, using it on video image sampling and choose thumbs image")
     parser.add_argument("-f", "-thumbs_filter", dest="thumbs_filter", default="", help="use filter for creating thumbnails")
