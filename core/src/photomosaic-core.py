@@ -68,7 +68,8 @@ class PhotoMosaicCore(object):
             enhance_colors=27,
             tolerance=0,
             seed=0,
-            thumbs_filter=''):
+            thumbs_filter='',
+            path_label="default"):
 
         self.src_img_path = src_img_path
         if material != '':
@@ -86,6 +87,13 @@ class PhotoMosaicCore(object):
         self.tolerance = tolerance
         random.seed(seed)
         self.thumbs_filter = thumbs_filter
+
+        self.thumbs_dir = os.path.join(".", "thumbnails_r{}_c{}_s{}_{}".format(row, col, int(scale*100), path_label))
+        self.thumbs_info_path = os.path.join(".", "thumbs_info_r{}_c{}_s{}_{}.json".format(row, col, int(scale*100), path_label))
+        self.tgt_img_filename = "{}_r{}_c{}_s{}_e{}_g{}".format(self.tgt_img_filename, row, col, int(scale*100), self.enhance_colors, self.min_space_same_thumb)
+
+        if not self.gen_thumbs:
+            print("Not generating new thumbnails, using folder: {}".format(self.thumbs_dir))
 
     def set_args_from_tool(self, tool_args_str):
 
@@ -160,6 +168,11 @@ class PhotoMosaicCore(object):
 
         if not os.path.exists(self.thumbs_dir):
             os.makedirs(self.thumbs_dir)
+        else:
+            if self.gen_thumbs:
+                i = input("Are you sure you want to overwrite {}? [y/n]".format(self.thumbs_dir))
+                if i.lower()[0] != "y":
+                    raise ValueError("User does not want to overwrite thumbnails.")
 
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
@@ -470,6 +483,8 @@ if __name__ == "__main__":
     parser.add_argument("-t", "-tolerance", dest="tolerance", default=0, help="set tolerance and seed args can generate different photo mosaic even the material images are the same")
     parser.add_argument("-seed", dest="seed", default=0, help="random seed, using it on video image sampling and choose thumbs image")
     parser.add_argument("-f", "-thumbs_filter", dest="thumbs_filter", default="", help="use filter for creating thumbnails")
+    parser.add_argument("--path_label", dest="path_label", default="default", help="Custom path name appended to create unique thumbnail folder")
+
 
     # only use for gui tool
     parser.add_argument("-tool-args", dest="tool_args", default="")
@@ -489,7 +504,8 @@ if __name__ == "__main__":
         (int)(args.enhance_colors),
         (float)(args.tolerance),
         (int)(args.seed),
-        args.thumbs_filter)
+        args.thumbs_filter,
+        args.path_label)
 
     if args.tool_args != '':
         core.set_args_from_tool(args.tool_args)
